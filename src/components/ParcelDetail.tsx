@@ -12,20 +12,18 @@ export function ParcelDetail({ parcel }: { parcel: ParcelLocation }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="grid gap-0 md:grid-cols-2">
-        {/* Photo satellite (PNG PNOA) + contour parcelle dessiné en SVG par-dessus */}
-        <div className="relative aspect-[4/3] bg-slate-100">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={satelliteUrl}
-            alt={`Vue satellite ${parcel.address}`}
-            className="h-full w-full object-cover"
-          />
-          {parcel.polygonPixels && (
-            <svg
-              viewBox="0 0 600 450"
-              preserveAspectRatio="none"
-              className="pointer-events-none absolute inset-0 h-full w-full"
-            >
+        {/* Image PNOA + contour parcelle dans un MÊME svg → alignement garanti */}
+        <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
+          <svg viewBox="0 0 600 450" preserveAspectRatio="xMidYMid slice" className="h-full w-full">
+            <image
+              href={satelliteUrl}
+              x={0}
+              y={0}
+              width={600}
+              height={450}
+              preserveAspectRatio="xMidYMid slice"
+            />
+            {parcel.polygonPixels && (
               <polygon
                 points={parcel.polygonPixels}
                 fill="#cc0000"
@@ -34,8 +32,8 @@ export function ParcelDetail({ parcel }: { parcel: ParcelLocation }) {
                 strokeWidth={3}
                 strokeLinejoin="round"
               />
-            </svg>
-          )}
+            )}
+          </svg>
           <span className="absolute bottom-2 left-2 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-medium text-white">
             Satellite PNOA · parcelle cadastrale
           </span>
