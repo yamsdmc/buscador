@@ -3,10 +3,10 @@
  * API WCF JSON gratuite et ouverte — aucune clé requise.
  * Doc : https://www.catastro.hacienda.gob.es/ws/Webservices_Libres.pdf
  *
- * Trois usages :
- *   - lookupByRef(ref)        → référence cadastrale → adresse + coordonnées
+ * Deux usages :
+ *   - lookupByRef(ref)        → référence cadastrale → adresse + coordonnées + bâti
  *   - searchNearby(lat, lng)  → coordonnées → parcelles les plus proches (triées par distance)
- *   - getSatelliteImage(...)  → orthophoto PNOA (IGN) + contour de la parcelle (WFS)
+ * (La génération d'image satellite vit dans `@/lib/satellite` — module isolé pour sharp.)
  */
 
 import type { ParcelLocation, NearbyParcel, BuildingInfo, BuildingUnit } from "@/lib/types";
@@ -15,8 +15,6 @@ import { PROVINCE_TO_COMMUNITY } from "@/lib/spain-provinces";
 
 const BASE = "https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCoordenadas.svc/json";
 const DNPRC_URL = "https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCallejero.svc/json/Consulta_DNPRC";
-const PNOA_URL = "https://www.ign.es/wms-inspire/pnoa-ma";
-const WFS_URL = "https://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx";
 const BU_URL = "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx";
 const ELEV_URL = "https://servicios.idee.es/wcs-inspire/mdt";
 const TIMEOUT = 8000;
@@ -449,151 +447,6 @@ export class CadastreService {
         .slice(0, limit);
     } catch {
       return [];
-    }
-  }
-
-  /**
-   * Orthophoto PNOA (IGN) centrée sur le point, avec le contour de la parcelle
-   * en rouge si une référence est fournie.
-   * `overlay` indique si le contour a pu être dessiné — sert à décider du cache :
-   * on ne met en cache long que les images complètes (avec tracé).
-   */
-  static async getSatelliteImage(
-    lat: number,
-    lng: number,
-    refcat?: string,
-  ): Promise<{ image: Buffer; overlay: boolean } | null> {
-    const WIDTH = 600;
-    const HEIGHT = 450;
-    const delta = 0.001;
-    const minLng = lng - delta;
-    const minLat = lat - delta;
-    const maxLng = lng + delta;
-    const maxLat = lat + delta;
-
-    try {
-      // Import paresseux : sharp (binaire natif) n'est chargé QUE pour la génération
-      // d'image, jamais pour les routes de données (RC/adresse/carte).
-      const sharp = (await import("sharp")).default;
-
-      const [satellite, polygon] = await Promise.all([
-        this.fetchWmsImage(PNOA_URL, {
-          LAYERS: "OI.OrthoimageCoverage",
-          SRS: "EPSG:4326",
-          BBOX: `${minLng},${minLat},${maxLng},${maxLat}`,
-          WIDTH: String(WIDTH),
-          HEIGHT: String(HEIGHT),
-          FORMAT: "image/png",
-        }),
-        refcat ? this.fetchParcelPolygon(refcat) : Promise.resolve(null),
-      ]);
-
-      if (!satellite) return null;
-
-      if (polygon && polygon.length > 0) {
-        const overlay = this.buildParcelOverlay(WIDTH, HEIGHT, polygon, minLat, minLng, maxLat, maxLng);
-        const image = await sharp(satellite)
-          .composite([{ input: overlay, blend: "over" }])
-          .jpeg({ quality: 80 })
-          .toBuffer();
-        return { image, overlay: true };
-      }
-
-      const image = await sharp(satellite).jpeg({ quality: 80 }).toBuffer();
-      // Pas de tracé : soit aucune ref fournie, soit le WFS a échoué (transitoire).
-      return { image, overlay: !refcat };
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Polygone de la parcelle via le WFS INSPIRE → tableau de [lat, lng].
-   * Un retry sur échec transitoire (le WFS du cadastre est parfois lent/instable).
-   */
-  private static async fetchParcelPolygon(refcat: string): Promise<[number, number][] | null> {
-    const ref = refcat.trim().substring(0, 14);
-    if (ref.length < 14) return null;
-
-    const params = new URLSearchParams({
-      service: "wfs",
-      version: "2",
-      request: "getfeature",
-      StoredQuery_id: "GetParcel",
-      refcat: ref,
-      srsname: "EPSG:4326",
-    });
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const res = await fetch(`${WFS_URL}?${params}`, {
-          signal: AbortSignal.timeout(TIMEOUT),
-          headers: { "User-Agent": "buscador-catastro/1.0" },
-        });
-        if (!res.ok) continue;
-
-        const xml = await res.text();
-        const match = xml.match(/<gml:posList[^>]*>([^<]+)<\/gml:posList>/);
-        if (!match) return null; // réponse valide sans géométrie → inutile de réessayer
-
-        const coords = match[1].trim().split(/\s+/).map(Number);
-        const points: [number, number][] = [];
-        for (let i = 0; i < coords.length - 1; i += 2) {
-          points.push([coords[i], coords[i + 1]]);
-        }
-        return points.length > 2 ? points : null;
-      } catch {
-        // timeout/réseau → on retente une fois
-      }
-    }
-    return null;
-  }
-
-  /** SVG contour rouge de la parcelle, en coordonnées pixel de l'image. */
-  private static buildParcelOverlay(
-    width: number,
-    height: number,
-    polygon: [number, number][],
-    minLat: number,
-    minLng: number,
-    maxLat: number,
-    maxLng: number,
-  ): Buffer {
-    const lngRange = maxLng - minLng;
-    const latRange = maxLat - minLat;
-    const svgPoints = polygon
-      .map(([lat, lng]) => {
-        const x = ((lng - minLng) / lngRange) * width;
-        const y = ((maxLat - lat) / latRange) * height;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(" ");
-
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-      <polygon points="${svgPoints}" fill="#cc0000" fill-opacity="0.2"
-               stroke="#cc0000" stroke-width="3" stroke-linejoin="round"/>
-    </svg>`;
-    return Buffer.from(svg);
-  }
-
-  private static async fetchWmsImage(
-    baseUrl: string,
-    layerParams: Record<string, string>,
-  ): Promise<Buffer | null> {
-    try {
-      const params = new URLSearchParams({
-        SERVICE: "WMS",
-        REQUEST: "GetMap",
-        VERSION: "1.1.1",
-        STYLES: "",
-        ...layerParams,
-      });
-      const res = await fetch(`${baseUrl}?${params}`, { signal: AbortSignal.timeout(TIMEOUT) });
-      if (!res.ok) return null;
-      if (!res.headers.get("content-type")?.includes("image")) return null;
-      return Buffer.from(await res.arrayBuffer());
-    } catch {
-      return null;
     }
   }
 }

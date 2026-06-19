@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CadastreService } from "@/lib/catastro";
+import { getSatelliteImage } from "@/lib/satellite";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     return new NextResponse(null, { status: 400 });
   }
 
-  const result = await CadastreService.getSatelliteImage(lat, lng, ref);
+  const result = await getSatelliteImage(lat, lng, ref);
   if (!result) return new NextResponse(null, { status: 404 });
 
   // On ne met en cache 24h QUE les images complètes (avec tracé de la parcelle).
