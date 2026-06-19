@@ -9,7 +9,6 @@
  *   - getSatelliteImage(...)  → orthophoto PNOA (IGN) + contour de la parcelle (WFS)
  */
 
-import sharp from "sharp";
 import type { ParcelLocation, NearbyParcel, BuildingInfo, BuildingUnit } from "@/lib/types";
 import { computeClimateZone } from "@/lib/climate-zone";
 import { PROVINCE_TO_COMMUNITY } from "@/lib/spain-provinces";
@@ -473,6 +472,10 @@ export class CadastreService {
     const maxLat = lat + delta;
 
     try {
+      // Import paresseux : sharp (binaire natif) n'est chargé QUE pour la génération
+      // d'image, jamais pour les routes de données (RC/adresse/carte).
+      const sharp = (await import("sharp")).default;
+
       const [satellite, polygon] = await Promise.all([
         this.fetchWmsImage(PNOA_URL, {
           LAYERS: "OI.OrthoimageCoverage",
