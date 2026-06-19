@@ -4,9 +4,10 @@
  * Doc : https://www.catastro.hacienda.gob.es/ws/Webservices_Libres.pdf
  *
  * Deux usages :
- *   - lookupByRef(ref)        → référence cadastrale → adresse + coordonnées + bâti
+ *   - lookupByRef(ref)        → adresse + coordonnées + bâti + contour parcelle (pixels)
  *   - searchNearby(lat, lng)  → coordonnées → parcelles les plus proches (triées par distance)
- * (La génération d'image satellite vit dans `@/lib/satellite` — module isolé pour sharp.)
+ * Aucune dépendance native : la photo satellite est un PNG proxifié par /api/satellite,
+ * le contour de parcelle est projeté en pixels ici et dessiné en SVG côté client.
  */
 
 import type { ParcelLocation, NearbyParcel, BuildingInfo, BuildingUnit } from "@/lib/types";
@@ -16,8 +17,14 @@ import { PROVINCE_TO_COMMUNITY } from "@/lib/spain-provinces";
 const BASE = "https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCoordenadas.svc/json";
 const DNPRC_URL = "https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCallejero.svc/json/Consulta_DNPRC";
 const BU_URL = "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx";
+const WFS_URL = "https://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx";
 const ELEV_URL = "https://servicios.idee.es/wcs-inspire/mdt";
 const TIMEOUT = 8000;
+
+/** Dimensions de l'image satellite + rayon de la bbox (doivent matcher /api/satellite). */
+const IMG_W = 600;
+const IMG_H = 450;
+const BBOX_DELTA = 0.001;
 
 /** État du bâti (INSPIRE conditionOfConstruction) → libellé FR. */
 const CONDITION_LABELS: Record<string, string> = {
@@ -179,6 +186,7 @@ export class CadastreService {
     // Appels indépendants des coordonnées, lancés en parallèle.
     const buildingPromise = this.fetchBuilding(clean);
     const inspirePromise = this.fetchBuildingInspire(refcat);
+    const polygonPromise = this.fetchParcelPolygon(refcat);
 
     try {
       const params = new URLSearchParams({
@@ -207,11 +215,12 @@ export class CadastreService {
 
       // 2e appel : coordonnées UTM (ETRS89) selon le huso déduit de la longitude.
       const huso = longitude <= -6 ? 29 : 30;
-      const [utm, altitude, building, inspire] = await Promise.all([
+      const [utm, altitude, building, inspire, polygon] = await Promise.all([
         this.fetchUtm(refcat, huso),
         this.fetchAltitude(latitude, longitude),
         buildingPromise,
         inspirePromise,
+        polygonPromise,
       ]);
 
       // Fusion DNPRC + Buildings INSPIRE.
@@ -237,6 +246,7 @@ export class CadastreService {
         zoneLetter: "T",
         altitude,
         climateZone: computeClimateZone(province, altitude),
+        polygonPixels: polygon ? this.projectPolygon(polygon, latitude, longitude) : undefined,
         building: merged,
       };
     } catch {
@@ -311,6 +321,71 @@ export class CadastreService {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Polygone de la parcelle via le WFS INSPIRE (https) → tableau de [lat, lng].
+   * Un retry sur échec transitoire.
+   */
+  private static async fetchParcelPolygon(refcat: string): Promise<[number, number][] | null> {
+    const ref = refcat.trim().substring(0, 14);
+    if (ref.length < 14) return null;
+
+    const params = new URLSearchParams({
+      service: "wfs",
+      version: "2",
+      request: "getfeature",
+      StoredQuery_id: "GetParcel",
+      refcat: ref,
+      srsname: "EPSG:4326",
+    });
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(`${WFS_URL}?${params}`, {
+          signal: AbortSignal.timeout(TIMEOUT),
+          headers: { "User-Agent": "buscador-catastro/1.0" },
+        });
+        if (!res.ok) continue;
+
+        const xml = await res.text();
+        const match = xml.match(/<gml:posList[^>]*>([^<]+)<\/gml:posList>/);
+        if (!match) return null;
+
+        const coords = match[1].trim().split(/\s+/).map(Number);
+        const points: [number, number][] = [];
+        for (let i = 0; i < coords.length - 1; i += 2) {
+          points.push([coords[i], coords[i + 1]]);
+        }
+        return points.length > 2 ? points : null;
+      } catch {
+        // timeout/réseau → on retente une fois
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Projette le polygone [lat, lng] en points pixel d'une image IMG_W×IMG_H,
+   * centrée sur (lat, lng) avec un rayon BBOX_DELTA — identique au cadrage de
+   * /api/satellite. Le client n'a plus qu'à dessiner un <polygon>.
+   */
+  private static projectPolygon(
+    polygon: [number, number][],
+    centerLat: number,
+    centerLng: number,
+  ): string {
+    const minLng = centerLng - BBOX_DELTA;
+    const maxLng = centerLng + BBOX_DELTA;
+    const minLat = centerLat - BBOX_DELTA;
+    const maxLat = centerLat + BBOX_DELTA;
+    return polygon
+      .map(([lat, lng]) => {
+        const x = ((lng - minLng) / (maxLng - minLng)) * IMG_W;
+        const y = ((maxLat - lat) / (maxLat - minLat)) * IMG_H;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
   }
 
   /**

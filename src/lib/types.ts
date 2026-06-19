@@ -20,6 +20,8 @@ export interface ParcelLocation {
   altitude?: number;
   /** Zone climatique CTE DB-HE, ex : "D2". */
   climateZone?: string;
+  /** Contour de la parcelle projeté en pixels d'une image 600×450 (SVG points). */
+  polygonPixels?: string;
   /** Données du bâti (usage, surfaces, année, unités) via Consulta_DNPRC. */
   building?: BuildingInfo;
 }

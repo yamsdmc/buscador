@@ -6,13 +6,13 @@ export function ParcelDetail({ parcel }: { parcel: ParcelLocation }) {
     return null;
   }
 
-  const satelliteUrl = `/api/satellite?lat=${parcel.latitude}&lng=${parcel.longitude}&ref=${parcel.refcat}`;
+  const satelliteUrl = `/api/satellite?lat=${parcel.latitude}&lng=${parcel.longitude}`;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${parcel.latitude},${parcel.longitude}`;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="grid gap-0 md:grid-cols-2">
-        {/* Photo satellite + contour parcelle */}
+        {/* Photo satellite (PNG PNOA) + contour parcelle dessiné en SVG par-dessus */}
         <div className="relative aspect-[4/3] bg-slate-100">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -20,6 +20,22 @@ export function ParcelDetail({ parcel }: { parcel: ParcelLocation }) {
             alt={`Vue satellite ${parcel.address}`}
             className="h-full w-full object-cover"
           />
+          {parcel.polygonPixels && (
+            <svg
+              viewBox="0 0 600 450"
+              preserveAspectRatio="none"
+              className="pointer-events-none absolute inset-0 h-full w-full"
+            >
+              <polygon
+                points={parcel.polygonPixels}
+                fill="#cc0000"
+                fillOpacity={0.2}
+                stroke="#cc0000"
+                strokeWidth={3}
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
           <span className="absolute bottom-2 left-2 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-medium text-white">
             Satellite PNOA · parcelle cadastrale
           </span>

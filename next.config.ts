@@ -1,8 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // sharp = binaire natif : externe au bundle, inclus tel quel côté serveur.
-  serverExternalPackages: ["sharp"],
+  /* Aucune dépendance native : la photo satellite est un PNG proxifié + overlay SVG client. */
 };
 
 export default nextConfig;
