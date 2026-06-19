@@ -16,8 +16,8 @@ import { PROVINCE_TO_COMMUNITY } from "@/lib/spain-provinces";
 const BASE = "https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCoordenadas.svc/json";
 const DNPRC_URL = "https://ovc.catastro.meh.es/OVCServWeb/OVCWcfCallejero/COVCCallejero.svc/json/Consulta_DNPRC";
 const PNOA_URL = "https://www.ign.es/wms-inspire/pnoa-ma";
-const WFS_URL = "http://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx";
-const BU_URL = "http://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx";
+const WFS_URL = "https://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx";
+const BU_URL = "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx";
 const ELEV_URL = "https://servicios.idee.es/wcs-inspire/mdt";
 const TIMEOUT = 8000;
 
