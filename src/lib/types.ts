@@ -78,7 +78,10 @@ export interface BuildingInfo {
 
 export interface NearbyParcel {
   refcat: string;
-  address: string;
+  /** Adresse lisible si disponible (flux OVC). Absente pour le top-N WFS. */
+  address?: string;
+  /** Surface de la parcelle en m² si connue (flux WFS). */
+  area?: number;
   /** Distance en mètres au point recherché. */
   distance: number;
 }

@@ -33,15 +33,30 @@ export default function Home() {
     setMapPoint(null);
   }
 
-  async function loadParcel(ref: string) {
+  async function loadParcel(ref: string): Promise<ParcelLocation | null> {
     const res = await fetch(`/api/lookup/rc?ref=${encodeURIComponent(ref)}`);
     const data: ParcelLocation = await res.json();
     if (!data.found) {
       setError("Référence cadastrale introuvable.");
-      return;
+      return null;
     }
     setDetail(data);
     setSelectedRef(data.refcat);
+    return data;
+  }
+
+  /** Charge les 20 parcelles les plus proches (flux RC) et les liste à côté. */
+  async function loadNearest(parcel: ParcelLocation) {
+    if (parcel.latitude === undefined || parcel.longitude === undefined) return;
+    const params = new URLSearchParams({
+      lat: String(parcel.latitude),
+      lng: String(parcel.longitude),
+      count: "20",
+      exclude: parcel.refcat ?? "",
+    });
+    const res = await fetch(`/api/lookup/nearest?${params}`);
+    const data: AddressSearchResult = await res.json();
+    if (data.parcels?.length) setCandidates(data.parcels);
   }
 
   async function onSelectCandidate(parcel: NearbyParcel) {
@@ -58,7 +73,8 @@ export default function Home() {
     setLoading(true);
     try {
       if (mode === "rc") {
-        await loadParcel(q);
+        const parcel = await loadParcel(q);
+        if (parcel) await loadNearest(parcel);
       } else {
         const res = await fetch(`/api/lookup/address?q=${encodeURIComponent(q)}`);
         const data: AddressSearchResult = await res.json();
@@ -192,6 +208,8 @@ export default function Home() {
           </div>
         </div>
       ) : (
+        // Mode adresse : liste au-dessus de la fiche (on désambiguïse d'abord).
+        mode === "address" &&
         candidates && (
           <section className="mt-8">
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -206,6 +224,16 @@ export default function Home() {
         <div className="mt-6">
           <ParcelDetail parcel={detail} />
         </div>
+      )}
+
+      {/* Mode RC : les 20 parcelles les plus proches, sous la fiche. */}
+      {mode === "rc" && detail && candidates && candidates.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            {candidates.length} parcelles les plus proches — clique pour voir
+          </h2>
+          <CandidateList parcels={candidates} selectedRef={selectedRef} onSelect={onSelectCandidate} />
+        </section>
       )}
     </main>
   );

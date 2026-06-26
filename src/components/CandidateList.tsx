@@ -32,9 +32,15 @@ export function CandidateList({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium text-slate-900">
-                  {parcel.address}
+                  {parcel.address ?? parcel.refcat}
                 </span>
-                <span className="block font-mono text-xs text-slate-400">{parcel.refcat}</span>
+                <span className="block truncate font-mono text-xs text-slate-400">
+                  {parcel.address
+                    ? parcel.refcat
+                    : parcel.area !== undefined
+                      ? `${parcel.area} m²`
+                      : parcel.refcat}
+                </span>
               </span>
               <span className="shrink-0 text-xs font-medium text-slate-500">
                 {parcel.distance === 0 ? "ici" : `${parcel.distance.toFixed(0)} m`}

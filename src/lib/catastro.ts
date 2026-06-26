@@ -49,6 +49,14 @@ function num(value: string | undefined): number | undefined {
   return Number.isNaN(n) ? undefined : n;
 }
 
+/** Distance en mètres entre deux points (équirectangulaire — exact à l'échelle d'un quartier). */
+function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const mPerDeg = 111320;
+  const dLat = (lat2 - lat1) * mPerDeg;
+  const dLng = (lng2 - lng1) * mPerDeg * Math.cos((lat1 * Math.PI) / 180);
+  return Math.round(Math.sqrt(dLat * dLat + dLng * dLng));
+}
+
 function rcToString(rc: { pc1: string; pc2: string; car: string; cc1: string; cc2: string }): string {
   return `${rc.pc1}${rc.pc2}${rc.car}${rc.cc1}${rc.cc2}`;
 }
@@ -523,5 +531,66 @@ export class CadastreService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Les `count` parcelles les plus proches d'un point (centroïde d'une RC),
+   * via le WFS INSPIRE en BBOX : distance exacte au point représentatif de
+   * chaque parcelle, nombre garanti (la BBOX s'élargit si nécessaire).
+   * Contrairement à `searchNearby` (rayon OVC fixe ~25-50 m), renvoie bien N.
+   */
+  static async findNearestParcels(
+    lat: number,
+    lng: number,
+    count = 20,
+    excludeRef?: string,
+  ): Promise<NearbyParcel[]> {
+    const exclude = excludeRef?.trim().substring(0, 14).toUpperCase();
+    // BBOX croissante jusqu'à avoir assez de parcelles (zones rurales = clairsemées).
+    for (const delta of [0.0008, 0.002, 0.005, 0.012]) {
+      const bbox = `${lat - delta},${lng - delta},${lat + delta},${lng + delta}`;
+      const params = new URLSearchParams({
+        service: "wfs",
+        version: "2.0.0",
+        request: "getfeature",
+        typeNames: "cp:CadastralParcel",
+        srsName: "EPSG:4326",
+        bbox: `${bbox},EPSG:4326`,
+      });
+
+      let xml: string;
+      try {
+        const res = await fetch(`${WFS_URL}?${params}`, {
+          signal: AbortSignal.timeout(TIMEOUT),
+          headers: { "User-Agent": "buscador-catastro/1.0" },
+        });
+        if (!res.ok) continue;
+        xml = await res.text();
+      } catch {
+        continue;
+      }
+
+      const parcels: NearbyParcel[] = [];
+      // Une feature par bloc <cp:CadastralParcel> … </cp:CadastralParcel>.
+      for (const block of xml.split("<cp:CadastralParcel").slice(1)) {
+        const ref = block.match(/<cp:nationalCadastralReference>([^<]+)/)?.[1]?.trim();
+        const pos = block.match(/<cp:referencePoint>[\s\S]*?<gml:pos>([^<]+)<\/gml:pos>/)?.[1];
+        if (!ref || !pos) continue;
+        if (exclude && ref.toUpperCase() === exclude) continue;
+        const [pLat, pLng] = pos.trim().split(/\s+/).map(Number);
+        if (Number.isNaN(pLat) || Number.isNaN(pLng)) continue;
+        parcels.push({
+          refcat: ref,
+          area: num(block.match(/<cp:areaValue[^>]*>([^<]+)/)?.[1]),
+          distance: haversine(lat, lng, pLat, pLng),
+        });
+      }
+
+      // Assez de candidats (ou dernière BBOX) → on trie et on coupe.
+      if (parcels.length >= count || delta === 0.012) {
+        return parcels.sort((a, b) => a.distance - b.distance).slice(0, count);
+      }
+    }
+    return [];
   }
 }
